@@ -1,0 +1,467 @@
+-- ============================================================
+--   MODULE 02 : AIRPORT DATA ANALYSIS
+--   Source     : Airport_Project_Data.csv  (Jan 2025, ~19,926 rows)
+--   Database   : MySQL  (adjust LOAD DATA path as needed)
+-- ============================================================
+
+
+-- ============================================================
+-- STEP 1 : CREATE THE DATABASE
+-- ============================================================
+
+CREATE DATABASE IF NOT EXISTS airport_db;
+USE airport_db;
+
+
+-- ============================================================
+-- STEP 2 : RELATIONAL TABLE CREATION
+-- ============================================================
+
+-- 2A. Airlines / Carriers
+CREATE TABLE IF NOT EXISTS Airlines (
+    airline_id          INT          PRIMARY KEY,
+    unique_carrier      VARCHAR(10)  NOT NULL,
+    unique_carrier_name VARCHAR(200) NOT NULL,
+    carrier_group       INT,
+    carrier_group_new   INT,
+    region              CHAR(1)
+);
+
+-- 2B. Cities (origin + destination)
+CREATE TABLE IF NOT EXISTS Cities (
+    city_market_id  INT          PRIMARY KEY,
+    city_name       VARCHAR(150) NOT NULL,
+    state_abr       CHAR(2),
+    state_fips      INT,
+    state_name      VARCHAR(100),
+    wac             INT
+);
+
+-- 2C. Airports
+CREATE TABLE IF NOT EXISTS Airports (
+    airport_id      INT          PRIMARY KEY,
+    airport_seq_id  INT,
+    iata_code       CHAR(10)     NOT NULL,
+    city_market_id  INT,
+    FOREIGN KEY (city_market_id) REFERENCES Cities(city_market_id)
+);
+
+-- 2D. Flights  (main fact table)
+CREATE TABLE IF NOT EXISTS Flights (
+    flight_id          INT AUTO_INCREMENT PRIMARY KEY,
+    airline_id         INT,
+    origin_airport_id  INT,
+    dest_airport_id    INT,
+    passengers         INT      DEFAULT 0,
+    freight            DECIMAL(15,2) DEFAULT 0,
+    mail               DECIMAL(15,2) DEFAULT 0,
+    distance           INT      DEFAULT 0,
+    distance_group     INT,
+    class              CHAR(1),       -- F=Scheduled Domestic, G=Charter, L=Cargo, P=Non-sched
+    year               INT,
+    quarter            INT,
+    month              INT,
+    FOREIGN KEY (airline_id)        REFERENCES Airlines(airport_id),
+    FOREIGN KEY (origin_airport_id) REFERENCES Airports(airport_id),
+    FOREIGN KEY (dest_airport_id)   REFERENCES Airports(airport_id)
+);
+
+
+-- ============================================================
+-- STEP 3 : IMPORT RAW DATA INTO A STAGING TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS raw_airport_data (
+    PASSENGERS          INT,
+    FREIGHT             DECIMAL(15,2),
+    MAIL                DECIMAL(15,2),
+    DISTANCE            INT,
+    UNIQUE_CARRIER      VARCHAR(10),
+    AIRLINE_ID          INT,
+    UNIQUE_CARRIER_NAME VARCHAR(200),
+    UNIQUE_CARRIER_ENTITY VARCHAR(10),
+    REGION              CHAR(1),
+    CARRIER             VARCHAR(10),
+    CARRIER_NAME        VARCHAR(200),
+    CARRIER_GROUP       INT,
+    CARRIER_GROUP_NEW   INT,
+    ORIGIN_AIRPORT_ID   INT,
+    ORIGIN_AIRPORT_SEQ_ID INT,
+    ORIGIN_CITY_MARKET_ID INT,
+    ORIGIN              CHAR(10),
+    ORIGIN_CITY_NAME    VARCHAR(150),
+    ORIGIN_STATE_ABR    CHAR(2),
+    ORIGIN_STATE_FIPS   INT,
+    ORIGIN_STATE_NM     VARCHAR(100),
+    ORIGIN_WAC          INT,
+    DEST_AIRPORT_ID     INT,
+    DEST_AIRPORT_SEQ_ID INT,
+    DEST_CITY_MARKET_ID INT,
+    DEST                CHAR(10),
+    DEST_CITY_NAME      VARCHAR(150),
+    DEST_STATE_ABR      CHAR(2),
+    DEST_STATE_FIPS     INT,
+    DEST_STATE_NM       VARCHAR(100),
+    DEST_WAC            INT,
+    YEAR                INT,
+    QUARTER             INT,
+    MONTH               INT,
+    DISTANCE_GROUP      INT,
+    CLASS               CHAR(1)
+);
+
+-- Load the CSV  (update the path to where your file lives on the server)
+LOAD DATA INFILE '/path/to/Airport_Project_Data.csv'
+INTO TABLE raw_airport_data
+FIELDS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS;
+
+
+-- ============================================================
+-- STEP 4 : POPULATE RELATIONAL TABLES FROM STAGING
+-- ============================================================
+
+-- 4A. Airlines
+INSERT IGNORE INTO Airlines
+    (airline_id, unique_carrier, unique_carrier_name, carrier_group, carrier_group_new, region)
+SELECT DISTINCT
+    AIRLINE_ID, UNIQUE_CARRIER, UNIQUE_CARRIER_NAME,
+    CARRIER_GROUP, CARRIER_GROUP_NEW, REGION
+FROM raw_airport_data;
+
+-- 4B. Origin Cities
+INSERT IGNORE INTO Cities
+    (city_market_id, city_name, state_abr, state_fips, state_name, wac)
+SELECT DISTINCT
+    ORIGIN_CITY_MARKET_ID, ORIGIN_CITY_NAME,
+    ORIGIN_STATE_ABR, ORIGIN_STATE_FIPS, ORIGIN_STATE_NM, ORIGIN_WAC
+FROM raw_airport_data;
+
+-- 4C. Destination Cities (merge – avoid duplicates)
+INSERT IGNORE INTO Cities
+    (city_market_id, city_name, state_abr, state_fips, state_name, wac)
+SELECT DISTINCT
+    DEST_CITY_MARKET_ID, DEST_CITY_NAME,
+    DEST_STATE_ABR, DEST_STATE_FIPS, DEST_STATE_NM, DEST_WAC
+FROM raw_airport_data;
+
+-- 4D. Origin Airports
+INSERT IGNORE INTO Airports
+    (airport_id, airport_seq_id, iata_code, city_market_id)
+SELECT DISTINCT
+    ORIGIN_AIRPORT_ID, ORIGIN_AIRPORT_SEQ_ID, ORIGIN, ORIGIN_CITY_MARKET_ID
+FROM raw_airport_data;
+
+-- 4E. Destination Airports
+INSERT IGNORE INTO Airports
+    (airport_id, airport_seq_id, iata_code, city_market_id)
+SELECT DISTINCT
+    DEST_AIRPORT_ID, DEST_AIRPORT_SEQ_ID, DEST, DEST_CITY_MARKET_ID
+FROM raw_airport_data;
+
+-- 4F. Flights
+INSERT INTO Flights
+    (airline_id, origin_airport_id, dest_airport_id,
+     passengers, freight, mail, distance, distance_group,
+     class, year, quarter, month)
+SELECT
+    AIRLINE_ID, ORIGIN_AIRPORT_ID, DEST_AIRPORT_ID,
+    PASSENGERS, FREIGHT, MAIL, DISTANCE, DISTANCE_GROUP,
+    CLASS, YEAR, QUARTER, MONTH
+FROM raw_airport_data;
+
+
+-- ============================================================
+-- STEP 5 : ANALYSING DATA
+-- ============================================================
+
+-- -------------------------------------------------------
+-- 5A. PASSENGERS PER CITY  (origin city → total departing passengers)
+-- -------------------------------------------------------
+SELECT
+    c.city_name                     AS origin_city,
+    c.state_abr                     AS state,
+    SUM(f.passengers)               AS total_passengers
+FROM Flights f
+JOIN Airports a ON f.origin_airport_id = a.airport_id
+JOIN Cities  c ON a.city_market_id     = c.city_market_id
+GROUP BY c.city_name, c.state_abr
+HAVING total_passengers > 0
+ORDER BY total_passengers DESC
+LIMIT 20;
+
+
+-- -------------------------------------------------------
+-- 5B. BUSINESS / SCHEDULED FLIGHT ROUTES
+--     CLASS = 'F'  →  Scheduled domestic passenger service
+-- -------------------------------------------------------
+SELECT
+    ao.iata_code                        AS origin_iata,
+    co.city_name                        AS origin_city,
+    ad.iata_code                        AS dest_iata,
+    cd.city_name                        AS dest_city,
+    COUNT(*)                            AS num_flights,
+    SUM(f.passengers)                   AS total_passengers,
+    ROUND(AVG(f.distance), 0)           AS avg_distance_miles
+FROM Flights f
+JOIN Airports ao ON f.origin_airport_id = ao.airport_id
+JOIN Cities  co ON ao.city_market_id    = co.city_market_id
+JOIN Airports ad ON f.dest_airport_id   = ad.airport_id
+JOIN Cities  cd ON ad.city_market_id    = cd.city_market_id
+WHERE f.class = 'F'
+GROUP BY ao.iata_code, co.city_name, ad.iata_code, cd.city_name
+ORDER BY total_passengers DESC
+LIMIT 20;
+
+
+-- -------------------------------------------------------
+-- 5C. TOP PERFORMING AIRPORTS
+--     Ranked by total passengers handled (depart + arrive)
+-- -------------------------------------------------------
+SELECT
+    a.iata_code                         AS airport_code,
+    c.city_name                         AS city,
+    c.state_abr                         AS state,
+    SUM(f.passengers)                   AS total_passengers,
+    COUNT(*)                            AS total_flights
+FROM Airports a
+JOIN Cities  c ON a.city_market_id = c.city_market_id
+JOIN Flights f ON f.origin_airport_id = a.airport_id
+             OR  f.dest_airport_id   = a.airport_id
+GROUP BY a.iata_code, c.city_name, c.state_abr
+ORDER BY total_passengers DESC
+LIMIT 15;
+
+
+-- -------------------------------------------------------
+-- 5D. FLIGHTS & PASSENGERS BY STATE
+-- -------------------------------------------------------
+SELECT
+    co.state_name                       AS origin_state,
+    COUNT(*)                            AS total_flights,
+    SUM(f.passengers)                   AS total_passengers,
+    SUM(f.freight)                      AS total_freight_lbs,
+    ROUND(AVG(f.distance), 0)           AS avg_distance_miles
+FROM Flights f
+JOIN Airports ao ON f.origin_airport_id = ao.airport_id
+JOIN Cities  co ON ao.city_market_id    = co.city_market_id
+GROUP BY co.state_name
+ORDER BY total_passengers DESC;
+
+
+-- -------------------------------------------------------
+-- 5E. POP vs ORIGIN CITY
+--     (departing passenger volume by city — proxy for demand)
+-- -------------------------------------------------------
+SELECT
+    c.city_name                         AS origin_city,
+    c.state_abr                         AS state,
+    SUM(f.passengers)                   AS departing_passengers,
+    COUNT(DISTINCT f.dest_airport_id)   AS unique_destinations,
+    ROUND(AVG(f.distance), 0)           AS avg_flight_distance
+FROM Flights f
+JOIN Airports a ON f.origin_airport_id = a.airport_id
+JOIN Cities  c ON a.city_market_id     = c.city_market_id
+GROUP BY c.city_name, c.state_abr
+HAVING departing_passengers > 0
+ORDER BY departing_passengers DESC
+LIMIT 20;
+
+
+-- -------------------------------------------------------
+-- 5F. POP vs DESTINATION CITY
+--     (arriving passenger volume by city)
+-- -------------------------------------------------------
+SELECT
+    c.city_name                         AS dest_city,
+    c.state_abr                         AS state,
+    SUM(f.passengers)                   AS arriving_passengers,
+    COUNT(DISTINCT f.origin_airport_id) AS unique_origins,
+    ROUND(AVG(f.distance), 0)           AS avg_flight_distance
+FROM Flights f
+JOIN Airports a ON f.dest_airport_id = a.airport_id
+JOIN Cities  c ON a.city_market_id   = c.city_market_id
+GROUP BY c.city_name, c.state_abr
+HAVING arriving_passengers > 0
+ORDER BY arriving_passengers DESC
+LIMIT 20;
+
+
+-- -------------------------------------------------------
+-- 5G. AIRLINE PERFORMANCE
+--     Which carriers carry the most passengers?
+-- -------------------------------------------------------
+SELECT
+    al.unique_carrier_name              AS airline,
+    COUNT(*)                            AS total_routes,
+    SUM(f.passengers)                   AS total_passengers,
+    SUM(f.freight)                      AS total_freight_lbs,
+    ROUND(AVG(f.distance), 0)           AS avg_distance_miles
+FROM Flights f
+JOIN Airlines al ON f.airline_id = al.airline_id
+GROUP BY al.unique_carrier_name
+HAVING total_passengers > 0
+ORDER BY total_passengers DESC
+LIMIT 15;
+
+
+-- -------------------------------------------------------
+-- 5H. FLIGHT CLASS BREAKDOWN
+--     F=Scheduled Domestic  G=Charter  L=Cargo  P=Non-scheduled
+-- -------------------------------------------------------
+SELECT
+    CLASS,
+    CASE CLASS
+        WHEN 'F' THEN 'Scheduled Domestic'
+        WHEN 'G' THEN 'Charter'
+        WHEN 'L' THEN 'Cargo / Non-passenger'
+        WHEN 'P' THEN 'Non-scheduled'
+        ELSE 'Other'
+    END                                 AS class_description,
+    COUNT(*)                            AS total_records,
+    SUM(passengers)                     AS total_passengers,
+    SUM(freight)                        AS total_freight_lbs
+FROM Flights
+GROUP BY CLASS
+ORDER BY total_passengers DESC;
+
+
+-- ============================================================
+-- STEP 6 : CREATING VIEWS
+-- ============================================================
+
+-- View 1 : Passengers per origin city
+CREATE OR REPLACE VIEW vw_passengers_per_city AS
+SELECT
+    c.city_name,
+    c.state_abr,
+    SUM(f.passengers)   AS total_passengers,
+    COUNT(*)            AS total_flights
+FROM Flights f
+JOIN Airports a ON f.origin_airport_id = a.airport_id
+JOIN Cities  c ON a.city_market_id     = c.city_market_id
+GROUP BY c.city_name, c.state_abr;
+
+-- View 2 : Top performing airports
+CREATE OR REPLACE VIEW vw_top_airports AS
+SELECT
+    a.iata_code,
+    c.city_name,
+    c.state_abr,
+    SUM(f.passengers)   AS total_passengers,
+    COUNT(*)            AS total_operations
+FROM Airports a
+JOIN Cities  c ON a.city_market_id = c.city_market_id
+JOIN Flights f ON f.origin_airport_id = a.airport_id
+              OR  f.dest_airport_id   = a.airport_id
+GROUP BY a.iata_code, c.city_name, c.state_abr;
+
+-- View 3 : Business (scheduled) routes only
+CREATE OR REPLACE VIEW vw_scheduled_routes AS
+SELECT
+    ao.iata_code        AS origin,
+    co.city_name        AS origin_city,
+    ad.iata_code        AS destination,
+    cd.city_name        AS dest_city,
+    SUM(f.passengers)   AS total_passengers,
+    AVG(f.distance)     AS avg_distance
+FROM Flights f
+JOIN Airports ao ON f.origin_airport_id = ao.airport_id
+JOIN Cities  co ON ao.city_market_id    = co.city_market_id
+JOIN Airports ad ON f.dest_airport_id   = ad.airport_id
+JOIN Cities  cd ON ad.city_market_id    = cd.city_market_id
+WHERE f.class = 'F'
+GROUP BY ao.iata_code, co.city_name, ad.iata_code, cd.city_name;
+
+
+-- ============================================================
+-- STEP 7 : STORED PROCEDURES
+-- ============================================================
+
+DELIMITER $$
+
+-- Procedure 1 : Get all flights for a given city name
+CREATE PROCEDURE GetFlightsByCity(IN p_city VARCHAR(150))
+BEGIN
+    SELECT
+        f.flight_id,
+        ao.iata_code                AS origin,
+        ad.iata_code                AS destination,
+        al.unique_carrier_name      AS airline,
+        f.passengers,
+        f.distance,
+        f.class,
+        f.month,
+        f.year
+    FROM Flights f
+    JOIN Airports ao ON f.origin_airport_id = ao.airport_id
+    JOIN Cities  co ON ao.city_market_id    = co.city_market_id
+    JOIN Airports ad ON f.dest_airport_id   = ad.airport_id
+    JOIN Airlines al ON f.airline_id        = al.airline_id
+    WHERE co.city_name LIKE CONCAT('%', p_city, '%')
+    ORDER BY f.passengers DESC;
+END$$
+
+-- Procedure 2 : Get top N airports by passengers
+CREATE PROCEDURE GetTopNAirports(IN p_limit INT)
+BEGIN
+    SELECT
+        a.iata_code,
+        c.city_name,
+        c.state_abr,
+        SUM(f.passengers)   AS total_passengers
+    FROM Airports a
+    JOIN Cities  c ON a.city_market_id = c.city_market_id
+    JOIN Flights f ON f.origin_airport_id = a.airport_id
+                  OR  f.dest_airport_id   = a.airport_id
+    GROUP BY a.iata_code, c.city_name, c.state_abr
+    ORDER BY total_passengers DESC
+    LIMIT p_limit;
+END$$
+
+-- Procedure 3 : Route summary between two states
+CREATE PROCEDURE GetRoutesBetweenStates(
+    IN p_origin_state CHAR(2),
+    IN p_dest_state   CHAR(2)
+)
+BEGIN
+    SELECT
+        ao.iata_code            AS origin_airport,
+        co.city_name            AS origin_city,
+        ad.iata_code            AS dest_airport,
+        cd.city_name            AS dest_city,
+        SUM(f.passengers)       AS total_passengers,
+        ROUND(AVG(f.distance),0) AS avg_distance_miles
+    FROM Flights f
+    JOIN Airports ao ON f.origin_airport_id = ao.airport_id
+    JOIN Cities  co ON ao.city_market_id    = co.city_market_id
+    JOIN Airports ad ON f.dest_airport_id   = ad.airport_id
+    JOIN Cities  cd ON ad.city_market_id    = cd.city_market_id
+    WHERE co.state_abr = p_origin_state
+      AND cd.state_abr = p_dest_state
+    GROUP BY ao.iata_code, co.city_name, ad.iata_code, cd.city_name
+    ORDER BY total_passengers DESC;
+END$$
+
+DELIMITER ;
+
+
+-- ============================================================
+-- EXAMPLE CALLS
+-- ============================================================
+
+-- Top 10 airports by passengers
+CALL GetTopNAirports(10);
+
+-- All flights departing from Houston
+CALL GetFlightsByCity('Houston');
+
+-- Routes from Texas to California
+CALL GetRoutesBetweenStates('TX', 'CA');
+
+-- Query the views
+SELECT * FROM vw_passengers_per_city  ORDER BY total_passengers DESC LIMIT 10;
+SELECT * FROM vw_top_airports         ORDER BY total_passengers DESC LIMIT 10;
+SELECT * FROM vw_scheduled_routes     ORDER BY total_passengers DESC LIMIT 10;
