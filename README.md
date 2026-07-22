@@ -126,6 +126,14 @@ airport-data-analysis-sql/
 
 ---
 
+# ✈️ Airport Data Analysis using SQL
+
+![MySQL](https://img.shields.io/badge/MySQL-Database-blue)
+![SQL](https://img.shields.io/badge/SQL-Analysis-green)
+![GitHub](https://img.shields.io/badge/GitHub-Portfolio-black)
+
+---
+
 ## 📌 Project Summary
 
 This project demonstrates how SQL can be used to design a relational database, analyze airport operations, evaluate airline performance, and generate business insights from real-world flight data.
