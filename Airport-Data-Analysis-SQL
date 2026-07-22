@@ -1,6 +1,6 @@
 -- ============================================================
 --   MODULE 02 : AIRPORT DATA ANALYSIS
---   Source     : Airport_Project_Data.csv  (Jan 2025, ~19,926 rows)
+--   Source     : Airport_Project_Data.csv  
 --   Database   : MySQL  (adjust LOAD DATA path as needed)
 -- ============================================================
 
